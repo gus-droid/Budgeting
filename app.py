@@ -1,6 +1,7 @@
+# library that allows us to show tabular data
 from tabulate import tabulate
 
-# Format it a certain Way
+# Format Budgetting in a way similar to google sheets for easy visualization on the CL
 data = [
     ["Alice", 24, "Engineer"],
     ["Bob", 30, "Teacher"]
