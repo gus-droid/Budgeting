@@ -9,7 +9,7 @@ connection = sqlite3.connect("personal_finance.db")
 cursor = connection.cursor()
 
 """
-        Maybe add ids to the tables?
+        ids to handle duplicates
  - database: personal_finance
     - Tables: 
         - 1.) budget (category, limit_amount, month, year)
@@ -20,6 +20,7 @@ cursor = connection.cursor()
 # budget table creation
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS budget (
+               id INTEGER,
                category TEXT,
                limit_amount REAL,
                month TEXT,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS budget (
 # expenses table creation
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS expenses (
+               id INTEGER,
                amount REAL,
                category TEXT,
                description TEXT,
