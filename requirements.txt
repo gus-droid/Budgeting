@@ -1,4 +1,7 @@
 tabulate
 colorama
 python-dotenv
-requests 
+requests
+yfinance
+matplotlib
+plotext 

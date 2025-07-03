@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from modules.ux import print_info, print_warning, print_error, input_with_help, progress_bar
 from db.db_operations import get_all_budgets, get_all_expenses
 from modules.state import SESSION
+from modules.investments import summarize_portfolio
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../.env'))
 
@@ -87,8 +88,9 @@ def advice_menu():
     """
     print_info("\nConversational Budgeting Advice (type /exit to leave at any time)")
     budget_context = summarize_current_budget()
+    investments_context = summarize_portfolio()
     system_prompt = (
-        f"{budget_context}\n\n"
+        f"{budget_context}\n\n{investments_context}\n\n"
         "You are a helpful, concise, and practical financial budgeting assistant. "
         "Give actionable, friendly, and specific advice for personal budgeting and money management. "
         "If the user asks a general question, provide a budgeting tip. "

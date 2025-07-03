@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS income (
     amount REAL
 )''')
 
+# investments table creation
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS investments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    shares REAL NOT NULL,
+    purchase_price REAL NOT NULL,
+    purchase_date TEXT
+)''')
+
 # after making tables, commit changes
 connection.commit()
 
