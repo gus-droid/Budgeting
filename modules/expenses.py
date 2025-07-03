@@ -10,6 +10,7 @@ from tabulate import tabulate
 from colorama import Fore, Style
 from modules.state import SESSION, UNDO_STACK
 from modules.gemini_api import real_gemini_api_conversation
+from modules.budget import ReturnToMainMenu
 
 def get_gemini_category_suggestion(description, categories):
     """Use Gemini to suggest the best category for an expense description.
@@ -40,7 +41,7 @@ def get_gemini_category_suggestion(description, categories):
     return None
 
 
-def expenses_menu():
+def expenses_menu(demo_mode=False):
     """Display the Expenses menu for adding, deleting, and viewing expenses.
 
     Allows the user to add, delete, or view expenses. Provides category suggestions using Gemini if available.
@@ -53,11 +54,17 @@ def expenses_menu():
         print("1. Add expense")
         print("2. Delete expense")
         print("3. Show expenses")
-        print("4. Back to Main Menu")
-        print("Type 'help' for info or 'back' to return to main menu at any prompt.")
+        if demo_mode:
+            print("4. Back to Demo Menu")
+        else:
+            print("4. Back to Main Menu")
+        print("Type 'help' for info or 'back' to return to menu at any prompt.")
         choice = input_with_help("Choose an option:")
         if choice == 'back' or choice == '4':
-            return
+            if demo_mode:
+                break
+            else:
+                raise ReturnToMainMenu()
         if choice == 'help':
             print_info("Add, delete, or view your expenses. When adding, you can auto-suggest categories from your budget.")
             continue
@@ -67,18 +74,23 @@ def expenses_menu():
                 print_info("Available categories:")
                 for idx, cat in enumerate(budget_cats, 1):
                     print(f"{idx}. {cat}")
-            # Ask for description first
             description = input_with_help("Description (company or what you spent on):", help_text="Write a short description of the expense.")
-            if description == 'back': continue
-            # Gemini category suggestion
+            if description == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             suggested_cat = get_gemini_category_suggestion(description, budget_cats)
             if suggested_cat:
                 cat_prompt = f"Category (Hit Enter for {suggested_cat}, or choose number):"
             else:
                 cat_prompt = "Category (choose number or type name):"
             category_input = input_with_help(cat_prompt)
-            if category_input == 'back': continue
-            # Handle number selection
+            if category_input == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             if category_input.isdigit() and 1 <= int(category_input) <= len(budget_cats):
                 category = budget_cats[int(category_input)-1]
             elif not category_input and suggested_cat:
@@ -86,25 +98,34 @@ def expenses_menu():
             else:
                 category = category_input
             amount = input_with_help("Amount:")
-            if amount == 'back': continue
-            # Date: default to today if blank
+            if amount == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             today_str = datetime.datetime.now().strftime('%Y-%m-%d')
             date = input_with_help(f"Date (Hit Enter for {today_str}):", help_text="Example: 2024-04-01")
-            if date == 'back': continue
+            if date == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             if not date:
                 date = today_str
             currency = input_with_help("Currency:")
-            if currency == 'back': continue
+            if currency == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             try:
                 progress_bar("Saving expense")
                 add_expense(float(amount), category, description, date, currency)
                 UNDO_STACK.append(('add_expense', (description, date)))
                 print_success(f"Added expense: {amount} {currency} for {description}.")
-                # Optionally: fake_carbon_api(description)
             except Exception as e:
                 print_error(f"Error: {e}")
         elif choice == '2':
-            # Show expenses for current month/year with indices
             expenses = get_all_expenses()
             month = SESSION['month']
             year = SESSION['year']
@@ -117,7 +138,11 @@ def expenses_menu():
                 amt, cat, desc, date, curr = row
                 print(f"{idx}. {desc} | {cat} | {amt} {curr} | {date}")
             idx_input = input_with_help("Enter the number of the expense to delete:")
-            if idx_input == 'back': continue
+            if idx_input == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             try:
                 idx = int(idx_input)
                 if not (1 <= idx <= len(filtered_expenses)):
@@ -130,7 +155,6 @@ def expenses_menu():
             desc, date = expense[2], expense[3]
             if ask_confirm(f"Are you sure you want to delete the expense '{desc}' on {date}?"):
                 try:
-                    # Save for undo
                     UNDO_STACK.append(('delete_expense', expense))
                     progress_bar("Deleting expense")
                     delete_expense(desc, date)
@@ -145,7 +169,6 @@ def expenses_menu():
             if not data:
                 print_warning("No expenses found.")
             else:
-                # Calculate category spending and limits for current month/year
                 month = SESSION['month']
                 year = SESSION['year']
                 budgets = get_all_budgets()
@@ -157,7 +180,6 @@ def expenses_menu():
                 table = []
                 for row in data:
                     amt, cat, desc, date, curr = row
-                    # Calculate spent so far for this category (excluding this expense)
                     spent_so_far = cat_spent.get(cat, 0) - amt if cat in cat_spent else 0
                     over = (spent_so_far + amt) > cat_limits.get(cat, float('inf'))
                     color = Fore.RED if over else Fore.GREEN

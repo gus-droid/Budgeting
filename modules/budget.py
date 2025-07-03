@@ -14,6 +14,9 @@ from modules.state import SESSION, UNDO_STACK
 if 'income' not in SESSION:
     SESSION['income'] = None
 
+class ReturnToMainMenu(Exception):
+    pass
+
 def setup_automatic_budget():
     """Interactive wizard to set up an automatic budget based on user input and Gemini suggestions.
 
@@ -273,6 +276,9 @@ def setup_automatic_budget():
         limit = round(income * cat['percent'] / 100, 2)
         add_to_budget(cat['name'], limit, month, year)
     print_success("Budget saved!")
+    # Set session to the current month/year so the dashboard and menus show the new budget
+    SESSION['month'] = month
+    SESSION['year'] = year
     # Show final table
     print_info("\nYour automatic budget:")
     table = [[cat['name'], f"{cat['percent']}%", f"${round(income * cat['percent'] / 100, 2)}"] for cat in categories]
@@ -280,7 +286,7 @@ def setup_automatic_budget():
     print_info("\nYou can always edit your budget categories later from the Budget menu.")
 
 
-def budget_menu():
+def budget_menu(demo_mode=False):
     """Display the Budget menu for adding, deleting, and viewing budget categories.
 
     Allows the user to add, delete, or view budget categories and limits for the current month and year.
@@ -295,7 +301,10 @@ def budget_menu():
         while True:
             income_input = input_with_help(f"Enter your monthly after-tax income for {month} {year} (required for budget % checks): $")
             if income_input == 'back':
-                return
+                if demo_mode:
+                    break
+                else:
+                    raise ReturnToMainMenu()
             try:
                 income = float(income_input)
                 if income <= 0:
@@ -310,9 +319,11 @@ def budget_menu():
         print("1. Add category")
         print("2. Delete category")
         print("3. Show budget")
-        print("4. Back to Main Menu")
-        print("Type 'help' for info or 'back' to return to main menu at any prompt.")
-        # Show percent left to allocate
+        if demo_mode:
+            print("4. Back to Demo Menu")
+        else:
+            print("4. Back to Main Menu")
+        print("Type 'help' for info or 'back' to return to menu at any prompt.")
         budgets = get_all_budgets()
         total_limit = sum(row[1] for row in budgets if row[2] == month and str(row[3]) == str(year))
         percent_used = (total_limit / income) * 100 if income else 0
@@ -320,12 +331,14 @@ def budget_menu():
         print_info(f"{percent_left:.2f}% of Income left to allocate.")
         choice = input_with_help("Choose an option:")
         if choice == 'back' or choice == '4':
-            return
+            if demo_mode:
+                break
+            else:
+                raise ReturnToMainMenu()
         if choice == 'help':
             print_info("Add, delete, or view your budget categories and limits for the current month/year.")
             continue
         if choice == '1':
-            # Show current categories before adding
             current_cats = [row[0] for row in budgets if row[2] == month and str(row[3]) == str(year)]
             if current_cats:
                 print_info("Current categories:")
@@ -334,15 +347,22 @@ def budget_menu():
             else:
                 print_info("No categories yet for this month/year.")
             category = input_with_help("Category:")
-            if category == 'back': continue
+            if category == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             limit_amount = input_with_help("Limit Amount:")
-            if limit_amount == 'back': continue
+            if limit_amount == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             try:
                 limit_amount = float(limit_amount)
             except ValueError:
                 print_warning("Please enter a valid number.")
                 continue
-            # Check if adding this would exceed 100%
             new_total = total_limit + limit_amount
             new_percent = (new_total / income) * 100 if income else 0
             percent_left = 100 - (total_limit / income) * 100 if income else 0
@@ -352,10 +372,20 @@ def budget_menu():
             if percent_left < 0:
                 print_warning(f"You have over-allocated your income by {-percent_left:.2f}%. Please adjust your categories.")
                 continue
-            month = input_with_help(f"Month (default: {month}):") or month
-            if month == 'back': continue
-            year = input_with_help(f"Year (default: {year}):") or year
-            if year == 'back': continue
+            month_input = input_with_help(f"Month (default: {month}):")
+            if month_input == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
+            month = month_input or month
+            year_input = input_with_help(f"Year (default: {year}):")
+            if year_input == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
+            year = year_input or year
             try:
                 progress_bar("Saving budget")
                 add_to_budget(category, float(limit_amount), month, int(year))
@@ -364,7 +394,6 @@ def budget_menu():
             except Exception as e:
                 print_warning(f"Error: {e}")
         elif choice == '2':
-            # Show current categories before deleting
             current_cats = [row[0] for row in budgets if row[2] == month and str(row[3]) == str(year)]
             if current_cats:
                 print_info("Current categories:")
@@ -373,17 +402,30 @@ def budget_menu():
             else:
                 print_info("No categories yet for this month/year.")
             category = input_with_help("Category to delete:")
-            if category == 'back': continue
+            if category == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
             if category not in current_cats:
                 print_warning(f"Category '{category}' not found for {month} {year}.")
                 continue
-            month = input_with_help(f"Month (default: {month}):") or month
-            if month == 'back': continue
-            year = input_with_help(f"Year (default: {year}):") or year
-            if year == 'back': continue
+            month_input = input_with_help(f"Month (default: {month}):")
+            if month_input == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
+            month = month_input or month
+            year_input = input_with_help(f"Year (default: {year}):")
+            if year_input == 'back':
+                if demo_mode:
+                    break
+                else:
+                    continue
+            year = year_input or year
             if ask_confirm(f"Are you sure you want to delete the budget for {category} in {month} {year}?"):
                 try:
-                    # Save for undo
                     budgets = get_all_budgets()
                     for row in budgets:
                         if row[0] == category and row[2] == month and str(row[3]) == str(year):
@@ -391,7 +433,6 @@ def budget_menu():
                     progress_bar("Deleting budget")
                     delete_from_budget(category, month, int(year))
                     print_success(f"Deleted budget for {category}.")
-                    # Show new percent left
                     budgets = get_all_budgets()
                     total_limit = sum(row[1] for row in budgets if row[2] == month and str(row[3]) == str(year))
                     percent_used = (total_limit / income) * 100 if income else 0
@@ -407,7 +448,6 @@ def budget_menu():
             if not data:
                 print_warning("No budget categories found.")
             else:
-                # Colorize over-budget categories
                 expenses = get_all_expenses()
                 cat_spent = {cat: 0 for cat, *_ in data}
                 for amt, cat, *_ in expenses:
