@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, session, flash
 import os
 from datetime import datetime
 from db import db_operations
@@ -7,10 +7,23 @@ import requests
 from db import investments as investments_db
 from db.database import reset_db
 import json
-from functools import lru_cache
+from functools import lru_cache, wraps
+from supabase import create_client, Client
+
 
 # Load environment variables from .env if present
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+
+# Supabase
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# Initialize Supabase client only if credentials are provided
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+else:
+    supabase = None
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key')
@@ -20,6 +33,15 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 now = datetime.now()
 CURRENT_MONTH = now.strftime('%B')
 CURRENT_YEAR = now.year
+
+# Authentication decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Demo data
 DEMO_BUDGETS = [
@@ -165,16 +187,97 @@ def summarize_current_budget_web():
     return "\n".join(summary_lines)
 
 @app.route('/demo')
+@login_required
 def demo_mode():
     session['demo_mode'] = True
     return redirect(url_for('dashboard'))
 
 @app.route('/exit_demo')
+@login_required
 def exit_demo():
     session.pop('demo_mode', None)
     return redirect(url_for('dashboard'))
 
 @app.route('/')
+def index():
+    # If Supabase is not configured, redirect to demo mode
+    if not supabase:
+        session['demo_mode'] = True
+        return redirect(url_for('dashboard'))
+    
+    # Redirect to login if not authenticated, otherwise to dashboard
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    return redirect(url_for('dashboard'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'GET':
+        return render_template('login.html', supabase_configured=bool(supabase))
+    
+    if request.method == 'POST':
+        email = request.form["email"]
+        password = request.form["password"]
+
+        # Check if Supabase is configured
+        if not supabase:
+            flash('Authentication is not configured. Please set up Supabase credentials.', 'error')
+            return render_template('login.html')
+
+        try:
+            response = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password,
+            })
+
+            user = response.user
+            if user:
+                session["user"] = user.email
+                session["user_id"] = user.id
+                flash('Login successful!', 'success')
+                return redirect(url_for('dashboard'))
+            else:
+                flash('Login failed. Check your credentials.', 'error')
+                return render_template('login.html')
+
+        except Exception as e:
+            flash(f'Login error: {str(e)}', 'error')
+            return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'GET':
+        return render_template('register.html', supabase_configured=bool(supabase))
+    
+    if request.method == 'POST':
+        email = request.form["email"]
+        password = request.form["password"]
+
+        # Check if Supabase is configured
+        if not supabase:
+            flash('Authentication is not configured. Please set up Supabase credentials.', 'error')
+            return render_template('register.html')
+
+        try:
+            response = supabase.auth.sign_up({
+                "email": email,
+                "password": password,
+            })
+
+            user = response.user
+            if user:
+                flash('Registration successful! Please check your email to confirm your account.', 'success')
+                return redirect(url_for('login'))
+            else:
+                flash('Registration failed.', 'error')
+                return render_template('register.html')
+
+        except Exception as e:
+            flash(f'Registration error: {str(e)}', 'error')
+            return render_template('register.html')
+
+@app.route('/dashboard')
+@login_required
 def dashboard():
     # Always ensure currency and rate are set and up to date
     if 'currency' not in session:
@@ -249,6 +352,7 @@ def dashboard():
     return render_template('dashboard.html', data=data, now=datetime.now(), goals=goals, recent_expenses=recent_expenses, investments_snapshot=investments_snapshot, get_currency_symbol=get_currency_symbol, CURRENCY_LIST=CURRENCY_LIST)
 
 @app.route('/onboarding', methods=['GET', 'POST'])
+@login_required
 def onboarding():
     message = None
     error = None
@@ -347,6 +451,7 @@ def onboarding_confirm():
     return redirect(url_for('dashboard'))
 
 @app.route('/budget', methods=['GET', 'POST'])
+@login_required
 def budget():
     message = None
     if session.get('demo_mode'):
@@ -365,6 +470,7 @@ def budget():
     return render_template('budget.html', budgets=budgets, message=message, budget_categories=[c[1] for c in categories], category_colors={c[1]: c[2] for c in categories})
 
 @app.route('/edit_budget/<int:budget_id>', methods=['GET', 'POST'])
+@login_required
 def edit_budget(budget_id):
     budget = next((b for b in db_operations.get_all_budgets() if b[0] == budget_id), None)
     categories = db_operations.get_all_categories()
@@ -379,11 +485,13 @@ def edit_budget(budget_id):
     return render_template('budget.html', edit_budget=budget, budgets=[b for b in db_operations.get_all_budgets() if b[3] == CURRENT_MONTH and b[4] == CURRENT_YEAR], budget_categories=[c[1] for c in categories], category_colors={c[1]: c[2] for c in categories})
 
 @app.route('/delete_budget/<int:budget_id>', methods=['POST'])
+@login_required
 def delete_budget(budget_id):
     db_operations.delete_budget_by_id(budget_id)
     return redirect(url_for('budget'))
 
 @app.route('/expenses', methods=['GET', 'POST'])
+@login_required
 def expenses():
     message = None
     if session.get('demo_mode'):
@@ -408,6 +516,7 @@ def expenses():
     return render_template('expenses.html', expenses=expenses, message=message, budget_categories=budget_categories)
 
 @app.route('/edit_expense/<int:expense_id>', methods=['GET', 'POST'])
+@login_required
 def edit_expense(expense_id):
     expense = db_operations.get_expense_by_id(expense_id)
     if not expense:
@@ -426,11 +535,13 @@ def edit_expense(expense_id):
     return render_template('edit_expense.html', expense=expense, budget_categories=budget_categories)
 
 @app.route('/delete_expense/<int:expense_id>', methods=['POST'])
+@login_required
 def delete_expense(expense_id):
     db_operations.delete_expense_by_id(expense_id)
     return redirect(url_for('expenses'))
 
 @app.route('/advice', methods=['GET', 'POST'])
+@login_required
 def advice():
     ai_response = None
     error = None
@@ -476,6 +587,7 @@ def advice():
     return render_template('advice.html', ai_response=ai_response, error=error)
 
 @app.route('/advice/chat', methods=['POST'])
+@login_required
 def advice_chat():
     data = request.get_json()
     question = data.get('question')
@@ -520,6 +632,7 @@ def advice_chat():
         return jsonify({'error': f'Error connecting to Gemini API: {e}'}), 500
 
 @app.route('/investments')
+@login_required
 def investments():
     if session.get('demo_mode'):
         investments = DEMO_INVESTMENTS
@@ -541,6 +654,7 @@ def investments():
     return render_template('investments.html', details=details, total=total)
 
 @app.route('/investments/add', methods=['GET', 'POST'])
+@login_required
 def add_investment():
     message = None
     error = None
@@ -560,6 +674,7 @@ def add_investment():
     return render_template('add_investment.html', message=message, error=error)
 
 @app.route('/goals')
+@login_required
 def goals():
     if session.get('demo_mode'):
         return render_template('goals.html', goals=DEMO_GOALS)
@@ -567,6 +682,7 @@ def goals():
     return render_template('goals.html', goals=goals)
 
 @app.route('/goals/add', methods=['GET', 'POST'])
+@login_required
 def add_goal():
     message = None
     error = None
@@ -584,6 +700,7 @@ def add_goal():
     return render_template('add_goal.html', message=message, error=error)
 
 @app.route('/goals/edit/<int:goal_id>', methods=['GET', 'POST'])
+@login_required
 def edit_goal(goal_id):
     goal = db_operations.get_goal_by_id(goal_id)
     if not goal:
@@ -604,19 +721,33 @@ def edit_goal(goal_id):
     return render_template('edit_goal.html', goal=goal, message=message, error=error)
 
 @app.route('/goals/delete/<int:goal_id>', methods=['POST'])
+@login_required
 def delete_goal(goal_id):
     db_operations.delete_goal(goal_id)
     return redirect(url_for('goals'))
 
 @app.route('/reset_db')
+@login_required
 def reset_db_route():
     reset_db()
     return 'Database has been reset. All data cleared and default categories restored.'
 
 @app.route('/reset_budget', methods=['POST'])
+@login_required
 def reset_budget():
     reset_db()
     return redirect(url_for('onboarding'))
+
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    session.pop("user_id", None)
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('login'))
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
